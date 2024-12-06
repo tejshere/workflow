@@ -26,6 +26,7 @@ jobs:
         id: release
         uses: actions/github-script@v6
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const commits = await github.rest.repos.listCommits({
               owner: '${{ github.repository_owner }}',
