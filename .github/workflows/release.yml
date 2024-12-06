@@ -28,8 +28,8 @@ jobs:
         with:
           script: |
             const commits = await github.rest.repos.listCommits({
-              owner: context.repo.owner,
-              repo: ${{ github.event.repository.name }},
+              owner: '${{ github.repository_owner }}',
+              repo: '${{ github.event.repository.name }}',
               per_page: 100
             });
             
@@ -40,8 +40,8 @@ jobs:
             const version = require('./package.json').version;
             
             await github.rest.repos.createRelease({
-              owner: context.repo.owner, 
-              repo: ${{ github.event.repository.name }},
+              owner: '${{ github.repository_owner }}', 
+              repo: '${{ github.event.repository.name }}',
               tag_name: `v${version}`,
               name: `Release v${version}`,
               body: changes,
