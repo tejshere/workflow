@@ -16,7 +16,7 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '16.x'
-          
+
       - name: Check repo context
         run: |
           echo "Repo owner: ${{ github.repository_owner }}"
@@ -29,7 +29,7 @@ jobs:
           script: |
             const commits = await github.rest.repos.listCommits({
               owner: context.repo.owner,
-              repo: context.repo.name,
+              repo: ${{ github.event.repository.name }},
               per_page: 100
             });
             
@@ -41,7 +41,7 @@ jobs:
             
             await github.rest.repos.createRelease({
               owner: context.repo.owner, 
-              repo: context.repo.name,
+              repo: ${{ github.event.repository.name }},
               tag_name: `v${version}`,
               name: `Release v${version}`,
               body: changes,
