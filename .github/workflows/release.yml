@@ -33,6 +33,8 @@ jobs:
               repo: '${{ github.event.repository.name }}',
               per_page: 100
             });
+
+            echo(commits.data.map(commit => `- ${commit.commit.message}`).join('\n'));
             
             const changes = commits.data.map(commit => {
               return `- ${commit.commit.message}`;
