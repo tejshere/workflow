@@ -34,7 +34,7 @@ jobs:
               per_page: 100
             });
 
-            echo(commits.data.map(commit => `- ${commit.commit.message}`).join('\n'));
+            echo (commits.data.map(commit => `- ${commit.commit.message}`).join('\n'));
             
             const changes = commits.data.map(commit => {
               return `- ${commit.commit.message}`;
