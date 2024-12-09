@@ -28,9 +28,11 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const branch = 'master';
             const commits = await github.rest.repos.listCommits({
               owner: '${{ github.repository_owner }}',
               repo: '${{ github.event.repository.name }}',
+              sha: branch,
               per_page: 100
             });
 
