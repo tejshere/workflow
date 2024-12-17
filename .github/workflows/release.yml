@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (leave empty to use latest from CHANGELOG.md)'
+        description: "Version to release (leave empty to use latest from CHANGELOG.md)"
         required: false
         type: string
   push:
     branches:
       - main
     paths:
-      - 'CHANGELOG.md'
+      - "CHANGELOG.md"
 
 jobs:
   create-or-update-release:
@@ -42,63 +42,37 @@ jobs:
         id: get-changelog
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
-          
-          # Create a temporary Python script for proper JSON encoding
-          cat > encode_changelog.py << 'EOF'
-          import sys
-          import json
-          import re
-          
-          def extract_changelog(version, content):
-              pattern = rf"^## \[*{version}\].*?(?=^## \[|\Z)"
-              match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
-              if match:
-                  # Remove the version header line and clean up the content
-                  changelog = re.sub(r'^## \[.*?\].*?\n', '', match.group(0))
-                  return changelog.strip()
-              return ""
-          
-          # Read the entire CHANGELOG.md
-          with open('CHANGELOG.md', 'r') as f:
-              content = f.read()
-          
-          # Get the version from environment
-          version = sys.argv[1]
-          
-          # Extract and encode the changelog entry
-          changelog = extract_changelog(version, content)
-          
-          # Print as JSON-encoded string
-          print(json.dumps(changelog))
-          EOF
-          
-          # Run the Python script and capture the output
-          CHANGELOG_JSON=$(python3 encode_changelog.py "$VERSION")
-          echo "changelog=$CHANGELOG_JSON" >> $GITHUB_OUTPUT
 
-      - name: Check if tag exists
-        id: check-tag
-        run: |
-          if git rev-parse "v${{ steps.get-version.outputs.version }}" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
+          # Extract changelog content and properly encode it for JSON
+          CHANGELOG_CONTENT=$(awk -v ver="$VERSION" '
+            $0 ~ "^## \\[*"ver"\\]" { p=1; next }
+            /^## \[*[0-9]+\.[0-9]+\.[0-9]+/ { if (p) exit }
+            p { print }
+          ' CHANGELOG.md)
+
+          # Use Python to properly encode the changelog content as JSON
+          echo "changelog=$(python3 -c '
+          import json
+          import sys
+          content = sys.stdin.read().strip()
+          print(json.dumps(content))
+              ' <<< "$CHANGELOG_CONTENT")" >> $GITHUB_OUTPUT
 
       - name: Create or update release
         uses: actions/github-script@v7
         with:
           script: |
             const tag = 'v${{ steps.get-version.outputs.version }}';
-            const changelog = JSON.parse(${{ steps.get-changelog.outputs.changelog }});
-            
+            // The changelog content is already properly JSON-encoded at this point
+            const changelog = ${{ steps.get-changelog.outputs.changelog }};
+
             const releases = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            
+
             const existingRelease = releases.data.find(release => release.tag_name === tag);
-            
+
             if (existingRelease) {
               await github.rest.repos.updateRelease({
                 owner: context.repo.owner,
