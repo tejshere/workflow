@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2024-12-17
 ### Added
-- New authentication system for API endpoints
+- New authentication system for 
 - Support for dark mode in the dashboard
 
 ### Changed
