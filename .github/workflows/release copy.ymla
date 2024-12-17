@@ -1,0 +1,108 @@
+name: Auto Release on Changelog Update
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'CHANGELOG.md'
+
+jobs:
+  create-or-update-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest version from CHANGELOG
+        id: get-version
+        run: |
+          # Extract the first version number from CHANGELOG.md
+          VERSION=$(grep -m 1 '^## \[*[0-9]\+\.[0-9]\+\.[0-9]\+' CHANGELOG.md | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+          if [ -z "$VERSION" ]; then
+            echo "No version found in CHANGELOG.md"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update package.json version
+        run: |
+          # Update version in package.json
+          npm version ${{ steps.get-version.outputs.version }} --no-git-tag-version --allow-same-version
+
+      - name: Get changelog entry
+        id: get-changelog
+        run: |
+          # Extract content between the first two version headers
+          CHANGELOG=$(awk '/^## \[*[0-9]+\.[0-9]+\.[0-9]+/ { if (p++) { exit }; next } p { print }' CHANGELOG.md)
+          # Escape newlines and set output
+          CHANGELOG="${CHANGELOG//'%'/'%25'}"
+          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
+          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
+          echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: check-tag
+        run: |
+          if git rev-parse "v${{ steps.get-version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit package.json changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add package.json
+          git commit -m "chore: bump version to ${{ steps.get-version.outputs.version }}"
+          git push
+
+      - name: Update existing release
+        if: steps.check-tag.outputs.exists == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = 'v${{ steps.get-version.outputs.version }}';
+            const releases = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            });
+            
+            const existingRelease = releases.data.find(release => release.tag_name === tag);
+            
+            if (existingRelease) {
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: existingRelease.id,
+                body: `${{ steps.get-changelog.outputs.changelog }}`
+              });
+            } else {
+              // Create new release for existing tag
+              await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tag,
+                name: `Release ${tag}`,
+                body: `${{ steps.get-changelog.outputs.changelog }}`,
+                draft: false,
+                prerelease: false
+              });
+            }
+
+      - name: Create new release and tag
+        if: steps.check-tag.outputs.exists == 'false'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.get-version.outputs.version }}
+          release_name: Release v${{ steps.get-version.outputs.version }}
+          body: ${{ steps.get-changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
