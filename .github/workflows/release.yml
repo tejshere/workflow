@@ -1,6 +1,12 @@
 name: Auto Release on Changelog Update
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (leave empty to use latest from CHANGELOG.md)'
+        required: false
+        type: string
   push:
     branches:
       - main
@@ -21,13 +27,18 @@ jobs:
       - name: Get latest version from CHANGELOG
         id: get-version
         run: |
-          # Extract the first version number from CHANGELOG.md
-          VERSION=$(grep -m 1 '^## \[*[0-9]\+\.[0-9]\+\.[0-9]\+' CHANGELOG.md | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
-          if [ -z "$VERSION" ]; then
-            echo "No version found in CHANGELOG.md"
-            exit 1
+          if [[ ! -z "${{ inputs.version }}" ]]; then
+            # Use manually specified version
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # Extract the first version number from CHANGELOG.md
+            VERSION=$(grep -m 1 '^## \[*[0-9]\+\.[0-9]\+\.[0-9]\+' CHANGELOG.md | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
+            if [ -z "$VERSION" ]; then
+              echo "No version found in CHANGELOG.md"
+              exit 1
+            fi
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Update package.json version
         run: |
@@ -37,8 +48,14 @@ jobs:
       - name: Get changelog entry
         id: get-changelog
         run: |
-          # Extract content between the first two version headers
-          CHANGELOG=$(awk '/^## \[*[0-9]+\.[0-9]+\.[0-9]+/ { if (p++) { exit }; next } p { print }' CHANGELOG.md)
+          VERSION="${{ steps.get-version.outputs.version }}"
+          # Extract content for specific version
+          CHANGELOG=$(awk -v ver="$VERSION" '
+            $0 ~ "^## \\[*"ver"\\]" { p=1; next }
+            /^## \[*[0-9]+\.[0-9]+\.[0-9]+/ { if (p) exit }
+            p { print }
+          ' CHANGELOG.md)
+          
           # Escape newlines and set output
           CHANGELOG="${CHANGELOG//'%'/'%25'}"
           CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
