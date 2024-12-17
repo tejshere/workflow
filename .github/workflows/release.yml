@@ -61,25 +61,33 @@ jobs:
         id: get-changelog
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
-          # Create a temporary file for the changelog
-          TEMP_CHANGELOG=$(mktemp)
           
-          # Extract content for specific version and clean it up
+          # Create a temporary Python script for proper JSON encoding
+          cat > encode_changelog.py << 'EOF'
+          import sys
+          import json
+          import re
+          
+          def clean_changelog(text):
+              # Remove any special characters
+              text = text.strip()
+              # Normalize newlines
+              text = text.replace('\r\n', '\n')
+              return text
+          
+          changelog = sys.stdin.read()
+          cleaned_changelog = clean_changelog(changelog)
+          print(json.dumps(cleaned_changelog))
+          EOF
+          
+          # Extract and process changelog
           awk -v ver="$VERSION" '
             $0 ~ "^## \\[*"ver"\\]" { p=1; next }
             /^## \[*[0-9]+\.[0-9]+\.[0-9]+/ { if (p) exit }
             p { print }
-          ' CHANGELOG.md | sed '/^$/N;/^\n$/D' > "$TEMP_CHANGELOG"
+          ' CHANGELOG.md | python3 encode_changelog.py >> changelog_output.txt
           
-          # Read the cleaned changelog and encode it properly for GitHub Actions
-          CHANGELOG=$(cat "$TEMP_CHANGELOG")
-          
-          # Use Python to properly encode the changelog
-          ENCODED_CHANGELOG=$(python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))" <<< "$CHANGELOG")
-          echo "changelog=$ENCODED_CHANGELOG" >> $GITHUB_OUTPUT
-          
-          # Clean up temporary file
-          rm "$TEMP_CHANGELOG"
+          echo "changelog=$(cat changelog_output.txt)" >> $GITHUB_OUTPUT
 
       - name: Check if tag exists
         id: check-tag
@@ -98,12 +106,7 @@ jobs:
           
           # Stage both package.json and package-lock.json
           git add package.json package-lock.json
-          
-          # Check if there are actually changes to commit
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
-          else
+          if ! git diff --staged --quiet; then
             git commit -m "chore: bump version to ${{ steps.get-version.outputs.version }}"
             git push
           fi
