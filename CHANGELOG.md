@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - clean up unused links in the hello
+- added new description in the hello
 
 ## [4.4.6] - 2024-12-17
 
