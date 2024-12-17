@@ -52,7 +52,6 @@ jobs:
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-          fi
 
       - name: Commit package.json changes
         run: |
