@@ -38,18 +38,50 @@ jobs:
             echo "version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
+      - name: Check current package version
+        id: check-version
+        run: |
+          # Read the current version from package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          CHANGELOG_VERSION="${{ steps.get-version.outputs.version }}"
+          
+          # Compare versions and set update flag
+          if [ "$CURRENT_VERSION" != "$CHANGELOG_VERSION" ]; then
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+            echo "Current version: $CURRENT_VERSION"
+            echo "New version: $CHANGELOG_VERSION"
+          else
+            echo "update_needed=false" >> $GITHUB_OUTPUT
+            echo "Version $CURRENT_VERSION already up to date"
+          fi
+
+      - name: Update package version
+        if: steps.check-version.outputs.update_needed == 'true'
+        run: |
+          # Update both package.json and package-lock.json without creating a git tag
+          npm version ${{ steps.get-version.outputs.version }} --no-git-tag-version --allow-same-version
+          
+          # Configure git for the commit
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Stage and commit the version changes
+          git add package.json package-lock.json
+          git commit -m "chore: bump version to ${{ steps.get-version.outputs.version }}"
+          git push
+
       - name: Get changelog entry
         id: get-changelog
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
-
+          
           # Extract changelog content and properly encode it for JSON
           CHANGELOG_CONTENT=$(awk -v ver="$VERSION" '
             $0 ~ "^## \\[*"ver"\\]" { p=1; next }
             /^## \[*[0-9]+\.[0-9]+\.[0-9]+/ { if (p) exit }
             p { print }
           ' CHANGELOG.md)
-
+          
           # Use Python to properly encode the changelog content as JSON
           echo "changelog=$(python3 -c '
           import json
@@ -63,16 +95,15 @@ jobs:
         with:
           script: |
             const tag = 'v${{ steps.get-version.outputs.version }}';
-            // The changelog content is already properly JSON-encoded at this point
             const changelog = ${{ steps.get-changelog.outputs.changelog }};
-
+            
             const releases = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-
+            
             const existingRelease = releases.data.find(release => release.tag_name === tag);
-
+            
             if (existingRelease) {
               await github.rest.repos.updateRelease({
                 owner: context.repo.owner,
