@@ -49,18 +49,25 @@ jobs:
         id: get-changelog
         run: |
           VERSION="${{ steps.get-version.outputs.version }}"
-          # Extract content for specific version
-          CHANGELOG=$(awk -v ver="$VERSION" '
+          # Create a temporary file for the changelog
+          TEMP_CHANGELOG=$(mktemp)
+          
+          # Extract content for specific version and clean it up
+          awk -v ver="$VERSION" '
             $0 ~ "^## \\[*"ver"\\]" { p=1; next }
             /^## \[*[0-9]+\.[0-9]+\.[0-9]+/ { if (p) exit }
             p { print }
-          ' CHANGELOG.md)
+          ' CHANGELOG.md | sed '/^$/N;/^\n$/D' > "$TEMP_CHANGELOG"
           
-          # Escape newlines and set output
-          CHANGELOG="${CHANGELOG//'%'/'%25'}"
-          CHANGELOG="${CHANGELOG//$'\n'/'%0A'}"
-          CHANGELOG="${CHANGELOG//$'\r'/'%0D'}"
-          echo "changelog=$CHANGELOG" >> $GITHUB_OUTPUT
+          # Read the cleaned changelog and encode it properly for GitHub Actions
+          CHANGELOG=$(cat "$TEMP_CHANGELOG")
+          
+          # Use Python to properly encode the changelog
+          ENCODED_CHANGELOG=$(python3 -c "import sys, json; print(json.dumps(sys.stdin.read()))" <<< "$CHANGELOG")
+          echo "changelog=$ENCODED_CHANGELOG" >> $GITHUB_OUTPUT
+          
+          # Clean up temporary file
+          rm "$TEMP_CHANGELOG"
 
       - name: Check if tag exists
         id: check-tag
@@ -85,6 +92,8 @@ jobs:
         with:
           script: |
             const tag = 'v${{ steps.get-version.outputs.version }}';
+            const changelog = JSON.parse('${{ steps.get-changelog.outputs.changelog }}');
+            
             const releases = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo
@@ -97,16 +106,15 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 release_id: existingRelease.id,
-                body: `${{ steps.get-changelog.outputs.changelog }}`
+                body: changelog
               });
             } else {
-              // Create new release for existing tag
               await github.rest.repos.createRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 tag_name: tag,
                 name: `Release ${tag}`,
-                body: `${{ steps.get-changelog.outputs.changelog }}`,
+                body: changelog,
                 draft: false,
                 prerelease: false
               });
@@ -114,12 +122,16 @@ jobs:
 
       - name: Create new release and tag
         if: steps.check-tag.outputs.exists == 'false'
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/github-script@v7
         with:
-          tag_name: v${{ steps.get-version.outputs.version }}
-          release_name: Release v${{ steps.get-version.outputs.version }}
-          body: ${{ steps.get-changelog.outputs.changelog }}
-          draft: false
-          prerelease: false
+          script: |
+            const changelog = JSON.parse('${{ steps.get-changelog.outputs.changelog }}');
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: 'v${{ steps.get-version.outputs.version }}',
+              name: 'Release v${{ steps.get-version.outputs.version }}',
+              body: changelog,
+              draft: false,
+              prerelease: false
+            });
