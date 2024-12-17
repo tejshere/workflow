@@ -28,10 +28,8 @@ jobs:
         id: get-version
         run: |
           if [[ ! -z "${{ inputs.version }}" ]]; then
-            # Use manually specified version
             echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
           else
-            # Extract the first version number from CHANGELOG.md
             VERSION=$(grep -m 1 '^## \[*[0-9]\+\.[0-9]\+\.[0-9]\+' CHANGELOG.md | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+')
             if [ -z "$VERSION" ]; then
               echo "No version found in CHANGELOG.md"
@@ -39,23 +37,6 @@ jobs:
             fi
             echo "version=$VERSION" >> $GITHUB_OUTPUT
           fi
-
-      - name: Check current package version
-        id: check-version
-        run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          CHANGELOG_VERSION="${{ steps.get-version.outputs.version }}"
-          if [ "$CURRENT_VERSION" != "$CHANGELOG_VERSION" ]; then
-            echo "update_needed=true" >> $GITHUB_OUTPUT
-          else
-            echo "update_needed=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Update package version
-        if: steps.check-version.outputs.update_needed == 'true'
-        run: |
-          # Update both package.json and package-lock.json
-          npm version ${{ steps.get-version.outputs.version }} --no-git-tag-version --allow-same-version
 
       - name: Get changelog entry
         id: get-changelog
@@ -68,26 +49,32 @@ jobs:
           import json
           import re
           
-          def clean_changelog(text):
-              # Remove any special characters
-              text = text.strip()
-              # Normalize newlines
-              text = text.replace('\r\n', '\n')
-              return text
+          def extract_changelog(version, content):
+              pattern = rf"^## \[*{version}\].*?(?=^## \[|\Z)"
+              match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+              if match:
+                  # Remove the version header line and clean up the content
+                  changelog = re.sub(r'^## \[.*?\].*?\n', '', match.group(0))
+                  return changelog.strip()
+              return ""
           
-          changelog = sys.stdin.read()
-          cleaned_changelog = clean_changelog(changelog)
-          print(json.dumps(cleaned_changelog))
+          # Read the entire CHANGELOG.md
+          with open('CHANGELOG.md', 'r') as f:
+              content = f.read()
+          
+          # Get the version from environment
+          version = sys.argv[1]
+          
+          # Extract and encode the changelog entry
+          changelog = extract_changelog(version, content)
+          
+          # Print as JSON-encoded string
+          print(json.dumps(changelog))
           EOF
           
-          # Extract and process changelog
-          awk -v ver="$VERSION" '
-            $0 ~ "^## \\[*"ver"\\]" { p=1; next }
-            /^## \[*[0-9]+\.[0-9]+\.[0-9]+/ { if (p) exit }
-            p { print }
-          ' CHANGELOG.md | python3 encode_changelog.py >> changelog_output.txt
-          
-          echo "changelog=$(cat changelog_output.txt)" >> $GITHUB_OUTPUT
+          # Run the Python script and capture the output
+          CHANGELOG_JSON=$(python3 encode_changelog.py "$VERSION")
+          echo "changelog=$CHANGELOG_JSON" >> $GITHUB_OUTPUT
 
       - name: Check if tag exists
         id: check-tag
@@ -98,26 +85,12 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Commit package version changes
-        if: steps.check-version.outputs.update_needed == 'true'
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          
-          # Stage both package.json and package-lock.json
-          git add package.json package-lock.json
-          if ! git diff --staged --quiet; then
-            git commit -m "chore: bump version to ${{ steps.get-version.outputs.version }}"
-            git push
-          fi
-
-      - name: Update existing release
-        if: steps.check-tag.outputs.exists == 'true'
+      - name: Create or update release
         uses: actions/github-script@v7
         with:
           script: |
             const tag = 'v${{ steps.get-version.outputs.version }}';
-            const changelog = JSON.parse('${{ steps.get-changelog.outputs.changelog }}');
+            const changelog = JSON.parse(${{ steps.get-changelog.outputs.changelog }});
             
             const releases = await github.rest.repos.listReleases({
               owner: context.repo.owner,
@@ -144,19 +117,3 @@ jobs:
                 prerelease: false
               });
             }
-
-      - name: Create new release and tag
-        if: steps.check-tag.outputs.exists == 'false'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const changelog = JSON.parse('${{ steps.get-changelog.outputs.changelog }}');
-            await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: 'v${{ steps.get-version.outputs.version }}',
-              name: 'Release v${{ steps.get-version.outputs.version }}',
-              body: changelog,
-              draft: false,
-              prerelease: false
-            });
