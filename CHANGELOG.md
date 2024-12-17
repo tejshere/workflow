@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- New authentication system for
+- New authentication system for improved security
 - Support for dark mode in the dashboard
 
 ### Changed
