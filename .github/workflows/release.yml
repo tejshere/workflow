@@ -40,9 +40,21 @@ jobs:
             echo "version=$VERSION" >> $GITHUB_OUTPUT
           fi
 
-      - name: Update package.json version
+      - name: Check current package version
+        id: check-version
         run: |
-          # Update version in package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          CHANGELOG_VERSION="${{ steps.get-version.outputs.version }}"
+          if [ "$CURRENT_VERSION" != "$CHANGELOG_VERSION" ]; then
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+          else
+            echo "update_needed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update package version
+        if: steps.check-version.outputs.update_needed == 'true'
+        run: |
+          # Update both package.json and package-lock.json
           npm version ${{ steps.get-version.outputs.version }} --no-git-tag-version --allow-same-version
 
       - name: Get changelog entry
@@ -78,13 +90,23 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Commit package.json changes
+      - name: Commit package version changes
+        if: steps.check-version.outputs.update_needed == 'true'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add package.json
-          git commit -m "chore: bump version to ${{ steps.get-version.outputs.version }}"
-          git push
+          
+          # Stage both package.json and package-lock.json
+          git add package.json package-lock.json
+          
+          # Check if there are actually changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          else
+            git commit -m "chore: bump version to ${{ steps.get-version.outputs.version }}"
+            git push
+          fi
 
       - name: Update existing release
         if: steps.check-tag.outputs.exists == 'true'
